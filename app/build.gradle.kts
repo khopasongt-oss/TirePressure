@@ -7,8 +7,8 @@ android {
     compileSdk = 34
     defaultConfig {
         applicationId = "com.example.tirepressure"
-        minSdk = 29
-        targetSdk = 29   // ต่ำไว้เพื่อให้เริ่ม service จาก widget ได้บนหัวเครื่อง
+        minSdk = 28
+        targetSdk = 28   // ต่ำไว้เพื่อให้เริ่ม service จาก widget ได้บนหัวเครื่อง
         versionCode = 1
         versionName = "1.0"
     }
