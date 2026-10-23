@@ -1,6 +1,9 @@
 package com.example.tirepressure
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
 
 /** อ่านค่าจากรถผ่าน reflection เพื่อ build ได้ด้วย Android SDK ปกติ (ไม่ต้องใช้ car-lib) */
 object CarProps {
@@ -12,17 +15,44 @@ object CarProps {
     const val HIGH_KPA = 300f  // ~43.5 psi
 
     @Volatile var lastError: String? = null
-    private var mgr: Any? = null
+    @Volatile private var mgr: Any? = null
+    @Volatile private var connecting = false
+    private var carObj: Any? = null
 
     private fun manager(ctx: Context): Any? {
         mgr?.let { return it }
-        return try {
+        val app = ctx.applicationContext
+        try {
             val carCls = Class.forName("android.car.Car")
-            val car = carCls.getMethod("createCar", Context::class.java).invoke(null, ctx.applicationContext)
-            mgr = carCls.getMethod("getCarManager", String::class.java).invoke(car, "property")
-            if (mgr == null) lastError = "getCarManager(property) = null"
-            mgr
-        } catch (t: Throwable) { lastError = t.toString(); null }
+            // วิธีใหม่ (Android 10 ขึ้นไป)
+            try {
+                val car = carCls.getMethod("createCar", Context::class.java).invoke(null, app)
+                mgr = carCls.getMethod("getCarManager", String::class.java).invoke(car, "property")
+                if (mgr != null) return mgr
+            } catch (e: NoSuchMethodException) {
+                // เครื่องเก่า (Android 9) ลองวิธีถัดไป
+            }
+            // วิธีเก่า (Android 9): เชื่อมต่อแบบ async แล้วคืนค่าในรอบโพลถัดไป (ห้ามบล็อก main thread)
+            if (!connecting) {
+                connecting = true
+                val conn = object : ServiceConnection {
+                    override fun onServiceConnected(n: ComponentName?, s: IBinder?) {
+                        try {
+                            mgr = carCls.getMethod("getCarManager", String::class.java).invoke(carObj, "property")
+                            if (mgr == null) lastError = "getCarManager(property) = null"
+                        } catch (t: Throwable) { lastError = t.toString() }
+                    }
+                    override fun onServiceDisconnected(n: ComponentName?) { mgr = null; connecting = false }
+                }
+                carObj = carCls.getMethod("createCar", Context::class.java, ServiceConnection::class.java)
+                    .invoke(null, app, conn)
+                carCls.getMethod("connect").invoke(carObj)
+            }
+            if (mgr == null && lastError == null) lastError = "กำลังเชื่อมต่อ Car service..."
+        } catch (t: Throwable) {
+            lastError = t.toString(); connecting = false
+        }
+        return mgr
     }
 
     /** รายการ property ทั้งหมดที่รถเปิดให้แอปเห็น: (id, ชื่อ, area ids) */
